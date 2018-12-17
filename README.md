@@ -11,6 +11,10 @@ The folder [tests-generation][test] contains the full scrips we used to generate
 
 In the [code][code] folder we provide all the scripts and the source code we used for our empirical study.
 
+The folder [plots][plots] contains all the plots that we do not include in the paper for the sake of space.
+
+All the raw data are in the [data][data] folder.
+
 In order to replicate it, follow these steps:
 
 1. Install all the Python dependencies with `pip install -r requirements`. We remember that Python3 is needed. You also need Java 1.8 and Maven installed on your machine.
@@ -24,3 +28,5 @@ In order to replicate it, follow these steps:
 [test]: https://github.com/sealuzh/branch-prediction/tree/master/test-generation
 [code]: https://github.com/sealuzh/branch-prediction/tree/master/code
 [gio]: https://github.com/giograno
+[data]: https://github.com/sealuzh/branch-prediction/tree/master/code/data
+[plots]: https://github.com/sealuzh/branch-prediction/tree/master/code/plots
