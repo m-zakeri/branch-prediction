@@ -1,13 +1,8 @@
-__author__ = "Giovanni Grano"
-__email__ = "grano@ifi.uzh.ch"
-__license__ = "MIT"
-
 import numpy as np
-
 import matplotlib
-matplotlib.use('Agg')
 from matplotlib import pyplot as plt
 from sklearn.externals import joblib
+from best_models import *
 
 from sklearn.model_selection import GridSearchCV, ShuffleSplit, cross_validate, RepeatedKFold
 from sklearn.metrics import mean_squared_error, median_absolute_error, r2_score, \
@@ -24,15 +19,43 @@ from sklearn.pipeline import Pipeline
 from constants import *
 import os
 from plots import *
+matplotlib.use('Agg')
+
+__author__ = "Giovanni Grano"
+__email__ = "grano@ifi.uzh.ch"
+__license__ = "MIT"
+
 
 py.sign_in('granoifi', 'yBY0BL7EvqRGPMeXP5jW')
 
 
-def load_frames(metric_frame='data'):
+def predict(target_class, budget):
+    """
+    Trains a model in respect to a given budget and tool; that target class is excluded from the training set
+    :param target_class: the class to predict
+    :param budget: the budget for the model
+    :return: a value of prediction
+    """
+    frame = load_frames(budget=budget)
+    original_len = int(frame.shape[0])
+    class_label = 'TARGET_CLASS' if 'TARGET_CLASS' in frame.columns else 'class_x'
+    target_frame = frame[frame[class_label] == target_class]
+    frame = frame[frame[class_label] != target_class]
+    if original_len == int(frame.shape[0])+1:
+        model = get_best_models(budget=budget, tool=settings.algo)
+        model.fit(frame[metrics], frame['y'])
+        prediction = model.predict(target_frame[metrics])
+        return prediction[0]
+    else:
+        print('something wrong with the frame')
+
+
+def load_frames(metric_frame='data', budget='default'):
     """Returns the frame with all the metrics and change the branch coverage column name to y
     :param metric_frame: the frame to read
+    :param budget: the budget to use
     """
-    frame = pd.read_csv(os.path.join(metric_frame, '{}.csv').format(algo))
+    frame = pd.read_csv('{}/{}/{}.csv'.format(metric_frame, budget, settings.algo))
     y_label = 'BranchCoverage' if 'BranchCoverage' in frame.columns else 'branch_coverage'
     frame = frame.rename(index=str, columns={y_label: "y"})
     frame = frame.fillna(value=0.0)
@@ -100,19 +123,20 @@ def get_param_grid(algorithm):
         exit()
 
 
-def run_regression(n_inner=5, n_outer=10, n_repeated=3, model_name='all'):
+def run_regression(n_inner=5, n_outer=10, n_repeated=3, model_name='all', budget='default'):
     """
     Start the regression
     :param n_inner: k of the inner fold
     :param n_outer: k of the outer fold
     :param n_repeated: number of repetitions
     :param model_name: the name of the model/s to train
+    :param budget: the budget to use as an oracle variable
     :return:
     """
     global X, Y
 
     print('Importing data')
-    frame = load_frames()
+    frame = load_frames(budget=budget)
     X = frame[metrics]
     Y = frame['y']
     print('Import done')
@@ -153,19 +177,25 @@ def run_regression(n_inner=5, n_outer=10, n_repeated=3, model_name='all'):
                                 'r2_score': [r2_score],
                                 'mean_absolute_error-AUC': [mean_absolute_error]})
 
-    metrics_res.to_csv('data/evaluation_{}_{}.csv'.format(algo, model_name), index=False)
+    metrics_res.to_csv('data/{}/evaluation_{}_{}.csv'.format(budget, algo, model_name), index=False)
 
     grid.fit(X, Y)
     model = grid.best_params_['classifier']
     print('Best model is:\n{}'.format(model))
 
-    model_string = open('data/_model_best_{}_{}.txt'.format(algo, model_name), 'w')
+    model_string = open('data/{}/_model_best_{}_{}.txt'.format(budget, algo, model_name), 'w')
     model_string.write(str(model))
     model_string.close()
 
     print('Saving the model on the entire set')
     grid.fit(X, Y)
-    joblib.dump(grid.best_estimator_, 'data/model_{}.pkl'.format(algo), compress=1)
+    # predictions = grid.predict(X)
+    # try:
+    #     frame['prediction'] = list(predictions)
+    #     frame.to_csv('data/{}/{}-predictions-{}.csv'.format(budget, algo, budget), index=False)
+    # except:
+    #     print('Some errors in the prediction')
+    joblib.dump(grid.best_estimator_, 'data/{}/model_{}-{}.pkl'.format(budget, algo, budget), compress=1)
 
 
 def plot_learning_curve(train_sizes, train_scores, test_scores):
@@ -223,26 +253,31 @@ def feature_importance(model):
     plot_feature_importance(s[:20], algo)
 
 
-def compute_mdi(model):
+def compute_mdi(tool, budget):
     """
     Computes the Mean in Decrease Accuracy for a given model.
     N.B: only works with a Random Forest Model that has the feature_importances_ variable
-    :param model: the model
-    :return: plot the feature importance
+    :param tool: the tool to plot the MDI for
+    :param budget: the budget to use for the training
     """
     features = [[] for _ in range(len(metrics))]
+    frame = load_frames(budget=budget)
+    settings.algo = tool
+    X = frame[metrics]
+    Y = frame['y']
     for i in range(0, 10):
+        model = get_best_models(budget=budget, tool=tool)
         model.fit(X, Y)
         for j, elem in enumerate(model.feature_importances_):
             features[j].append(elem)
     runs = list(range(10))
     features_importance = pd.DataFrame(features, columns=runs, index=metrics)
-    features_importance.to_csv('data/mdi_features_{}.csv'.format(algo))
+    features_importance.to_csv('data/{}/mdi_features_{}.csv'.format(budget, tool))
     mean = lambda x: sum(x) / len(x)
     features_average = [mean(x) for x in features]
     s = sorted(zip(map(lambda x: round(x, 3), features_average), metrics), reverse=True)
     print(s)
-    plot_feature_importance(s[:20], algo)
+    plot_feature_importance(s[:20], tool, budget)
 
 
 def get_scoring():
@@ -254,12 +289,37 @@ def get_scoring():
                 mean_absolute_error=make_scorer(mean_absolute_error))
 
 
+def run_prediction_for_all_frame(budget):
+    """
+    Predicts for every single class in the dataset training a new model without that class in the training set
+    :param budget: the budget for the model
+    :return: it saves the new frame with the predictions
+    """
+    frame = pd.read_csv('data/{}/{}.csv'.format(budget, settings.algo))
+    class_label = 'TARGET_CLASS' if 'TARGET_CLASS' in frame.columns else 'class_x'
+    classes = frame[class_label].unique().tolist()
+    predictions = []
+    for cl in classes:
+        predictions.append(predict(target_class=cl, budget=budget))
+    frame['prediction'] = predictions
+    frame.to_csv('data/{}/{}-predictions-{}.csv'.format(budget, settings.algo, budget), index=False)
+
+
 if __name__ == '__main__':
     global algo
     pd.options.display.float_format = '{:,.3f}'.format
+    budgets = ['180', '300', '600', 'default']
     # EvoSuite learning
-    algo = 'evosuite'
-    run_regression(n_inner=5, n_outer=10, model_name='rfr')
+    settings.algo = 'evosuite'
+    for budget in budgets:
+        compute_mdi(tool=settings.algo, budget=budget)
+        run_regression(n_inner=5, n_outer=10, model_name='rfr', budget=budget)
+
     # Randoop learning
-    algo = 'randoop'
-    run_regression(n_inner=5, n_outer=10, model_name='rfr')
+    settings.algo = 'randoop'
+    for budget in budgets:
+        # pass
+        compute_mdi(tool=settings.algo, budget=budget)
+        run_regression(n_inner=5, n_outer=10, model_name='rfr', budget=budget)
+
+

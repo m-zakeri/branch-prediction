@@ -24,10 +24,21 @@ def main(path_evosuite, path_randoop):
     get_randoop_frame(path_randoop)
 
 
-def get_randoop_frame(path):
+def extract_randoop(path_generated_files, budget):
+    """
+    Extracts the data about the coverage from Randoop data
+    :param path_generated_files: the path where the files have been generated
+    :param budget: the budget given to the generation
+    :return: is saves a frame
+    """
+    get_randoop_frame(path_generated_files, budget)
+
+
+def get_randoop_frame(path, budget):
     """
     Extracts the Randoop coverage frame
     :param path: the path for the generated Randoop projects
+    :param budget: the budget given to the generation
     """
     projects = os.listdir('projects')
     print('Projects to analyze:')
@@ -60,9 +71,11 @@ def get_randoop_frame(path):
     outcome = pd.DataFrame({'project': project_list,
                             'class': class_list,
                             'branch_coverage': coverage_list})
-    outcome.to_csv('{}/raw_randoop.csv'.format(st.DATA), index=False)
+    raw_path = '{}/{}/raw_randoop.csv'.format(st.DATA, budget)
+    outcome.to_csv(raw_path, index=False)
     grouped = outcome.groupby(['project', 'class'])['branch_coverage'].mean()
-    grouped.to_csv('{}/randoop_coverage.csv'.format(st.DATA))
+    grouped.to_csv('{}/{}/randoop_coverage.csv'.format(st.DATA, budget))
+    # remove_0_coverage(grouped, 'branch_coverage', '{}/{}/randoop.csv'.format(st.DATA, budget))
 
 
 def compile_test(project, path):
@@ -178,7 +191,10 @@ def remove_0_coverage(path, coverage_field, name):
     :param coverage_field: the field containing the coverage value
     :param name: the name of the file in output
     """
-    frame = pd.read_csv(path)
+    if not isinstance(path, type(pd.DataFrame())):
+        frame = pd.read_csv(path)
+    else:
+        frame = path
     frame = frame[frame[coverage_field]!=0]
     frame.to_csv('{}.csv'.format(name), index=False)
 
@@ -204,8 +220,15 @@ def get_list_cut(directory='metrics', out_dir='.'):
 
 
 if __name__ == '__main__':
-    path_evosuite = sys.argv[1]
-    path_randoop = sys.argv[2]
-    main(path_evosuite, path_randoop)
-    remove_0_coverage('data/evosuite_coverage.csv', 'BranchCoverage', 'data/evosuite_no_0')
-    remove_0_coverage('data/randoop_coverage.csv', 'branch_coverage', 'data/randoop_no_0')
+    budgets = ['default', '180', '300', '600']
+
+    # if len(sys.argv)-1 == len(budgets):
+    #     i = 1
+    #     for budget in budgets:
+    #         path = sys.argv[i]
+    #         i += 1
+    #         get_randoop_frame(path=path, budget=budget)
+
+    for budget in budgets:
+        remove_0_coverage('{}/{}/randoop_coverage.csv'.format(st.DATA, budget), 'branch_coverage',
+                          '{}/{}/randoop-{}'.format(st.DATA, budget,budget))
