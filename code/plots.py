@@ -17,7 +17,7 @@ from sklearn import linear_model
 from best_models import *
 import matplotlib.pyplot as plt
 
-py.sign_in('granoifi', 'yBY0BL7EvqRGPMeXP5jW')
+py.sign_in('***********', '**********')
 
 
 def plot_feature_importance(metrics, name, budget):

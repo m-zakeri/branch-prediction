@@ -4,7 +4,7 @@ from matplotlib import pyplot as plt
 from sklearn.externals import joblib
 from best_models import *
 
-from sklearn.model_selection import GridSearchCV, ShuffleSplit, cross_validate, RepeatedKFold
+from sklearn.model_selection import GridSearchCV, ShuffleSplit, cross_validate, RepeatedKFold, RepeatedStratifiedKFold, KFold
 from sklearn.metrics import mean_squared_error, median_absolute_error, r2_score, \
     mean_absolute_error, mean_squared_log_error, make_scorer
 
@@ -26,7 +26,7 @@ __email__ = "grano@ifi.uzh.ch"
 __license__ = "MIT"
 
 
-py.sign_in('granoifi', 'yBY0BL7EvqRGPMeXP5jW')
+# py.sign_in('*********', '************')
 
 
 def predict(target_class, budget):
@@ -58,38 +58,20 @@ def load_frames(metric_frame='data', budget='default'):
     frame = pd.read_csv('{}/{}/{}.csv'.format(metric_frame, budget, settings.algo))
     y_label = 'BranchCoverage' if 'BranchCoverage' in frame.columns else 'branch_coverage'
     frame = frame.rename(index=str, columns={y_label: "y"})
+    frame = frame.replace([np.inf, -np.inf], np.nan)
     frame = frame.fillna(value=0.0)
-    frame = frame.reset_index()
+    frame = frame.reset_index(drop=True)
     return frame
 
 
 def get_param_grid(algorithm):
     """
     Returns the right parameter grid according to the selected algorithm
-    Valid parameters are 'all', 'svr', 'huber', 'mlp, 'rfr' and 'test'
+    Valid parameters are 'svr', 'huber', 'mlp, 'rfr' and 'test'
     :param algorithm: the algorithm to choose
     :return: a dictionary with the parameter grid
     """
-    if algorithm == 'all':
-        return [dict(classifier=[SVR()],
-                     preprocessing=[StandardScaler(), None],
-                     classifier__epsilon=[0.025, 0.05, 0.1, 0.2, 0.4],
-                     classifier__C=[2 ** x for x in np.linspace(-30, 20, num=15)]),
-                dict(classifier=[HuberRegressor()],
-                     preprocessing=[None],
-                     classifier__alpha=[2 ** x for x in np.linspace(-30, 20, num=15)]),
-                dict(classifier=[MLPRegressor()],
-                     preprocessing=[StandardScaler(), None],
-                     classifier__alpha=[2 ** x for x in np.linspace(-30, 20, num=15)],
-                     classifier__hidden_layer_sizes=[(h_unit, h_layer) for h_unit in [1, 3, 5, 9]
-                                                     for h_layer in [int(round(73 * x)) for x in [0.5, 1, 2, 3]]]),
-                dict(classifier=[RandomForestRegressor()],
-                     preprocessing=[None],
-                     classifier__n_estimators=[2 * x for x in range(1, 11)],
-                     classifier__max_features=[int((len(metrics) / 10) * x) for x in range(1, 11)],
-                     classifier__max_depth=[5 * x for x in range(1, 11)],
-                     classifier__min_samples_leaf=[1 * x for x in range(1, 6)])]
-    elif algorithm == 'svr':
+    if algorithm == 'svr':
         return [dict(classifier=[SVR()],
                      preprocessing=[StandardScaler(), None],
                      classifier__epsilon=[0.025, 0.05, 0.1, 0.2, 0.4],
@@ -110,7 +92,8 @@ def get_param_grid(algorithm):
                      classifier__n_estimators=[2 * x for x in range(1, 11)],
                      classifier__max_features=[int((len(metrics) / 10) * x) for x in range(1, 11)],
                      classifier__max_depth=[5 * x for x in range(1, 11)],
-                     classifier__min_samples_leaf=[1 * x for x in range(1, 6)])]
+                     classifier__min_samples_leaf=[1 * x for x in range(1, 6)]
+                     )]
     elif algorithm == 'test':
         return [dict(classifier=[RandomForestRegressor()],
                 preprocessing=[None],
@@ -123,7 +106,13 @@ def get_param_grid(algorithm):
         exit()
 
 
-def run_regression(n_inner=5, n_outer=10, n_repeated=3, model_name='all', budget='default'):
+def clean_dataset(df):
+    frame = df.replace([np.inf, -np.inf], np.nan)
+    frame = frame.fillna(value=0.0)
+    return frame.reset_index(drop=True)
+
+
+def run_regression(n_inner=5, n_outer=10, n_repeated=3, model_name='rfr', budget='default', predict=False):
     """
     Start the regression
     :param n_inner: k of the inner fold
@@ -131,6 +120,7 @@ def run_regression(n_inner=5, n_outer=10, n_repeated=3, model_name='all', budget
     :param n_repeated: number of repetitions
     :param model_name: the name of the model/s to train
     :param budget: the budget to use as an oracle variable
+    :param predict: flag for running the prediction and save the model
     :return:
     """
     global X, Y
@@ -139,6 +129,8 @@ def run_regression(n_inner=5, n_outer=10, n_repeated=3, model_name='all', budget
     frame = load_frames(budget=budget)
     X = frame[metrics]
     Y = frame['y']
+    X = clean_dataset(X)
+    Y = clean_dataset(Y)
     print('Import done')
 
     pipe = Pipeline([('preprocessing', StandardScaler()),
@@ -146,13 +138,14 @@ def run_regression(n_inner=5, n_outer=10, n_repeated=3, model_name='all', budget
 
     param_grid = get_param_grid(model_name)
 
-    inner_cv = ShuffleSplit(n_splits=n_inner)
+    inner_cv = KFold(n_splits=n_inner)
     outer_cv = RepeatedKFold(n_splits=n_outer, n_repeats=n_repeated)
 
     grid = GridSearchCV(estimator=pipe,
                         param_grid=param_grid,
                         cv=inner_cv,
                         scoring='neg_mean_absolute_error',
+                        return_train_score=True,
                         verbose=1,
                         n_jobs=-1)
 
@@ -160,13 +153,13 @@ def run_regression(n_inner=5, n_outer=10, n_repeated=3, model_name='all', budget
                              cv=outer_cv,
                              X=X,
                              y=Y,
-                             scoring=get_scoring(),
+                             scoring=get_scoring(model_name),
                              return_train_score=True,
                              verbose=1,
                              n_jobs=-1)
 
     median_absolute_error = results.get('test_median_absolute_error').mean()
-    mean_squared_log_error = results.get('test_mean_squared_log_error').mean()
+    mean_squared_log_error = 0 if model_name == 'huber' else results.get('test_mean_squared_log_error').mean()
     mean_squared_error = results.get('test_mean_squared_error').mean()
     r2_score = results.get('test_r2_score').mean()
     mean_absolute_error = results.get('test_mean_absolute_error').mean()
@@ -177,25 +170,26 @@ def run_regression(n_inner=5, n_outer=10, n_repeated=3, model_name='all', budget
                                 'r2_score': [r2_score],
                                 'mean_absolute_error-AUC': [mean_absolute_error]})
 
-    metrics_res.to_csv('data/{}/evaluation_{}_{}.csv'.format(budget, algo, model_name), index=False)
+    metrics_res.to_csv('data/{}/evaluation_{}_{}.csv'.format(budget, settings.algo, model_name), index=False)
 
     grid.fit(X, Y)
     model = grid.best_params_['classifier']
     print('Best model is:\n{}'.format(model))
 
-    model_string = open('data/{}/_model_best_{}_{}.txt'.format(budget, algo, model_name), 'w')
+    model_string = open('data/{}/_model_best_{}_{}.txt'.format(budget, settings.algo, model_name), 'w')
     model_string.write(str(model))
     model_string.close()
 
-    print('Saving the model on the entire set')
-    grid.fit(X, Y)
-    # predictions = grid.predict(X)
-    # try:
-    #     frame['prediction'] = list(predictions)
-    #     frame.to_csv('data/{}/{}-predictions-{}.csv'.format(budget, algo, budget), index=False)
-    # except:
-    #     print('Some errors in the prediction')
-    joblib.dump(grid.best_estimator_, 'data/{}/model_{}-{}.pkl'.format(budget, algo, budget), compress=1)
+    if predict:
+        print('Saving the model on the entire set')
+        grid.fit(X, Y)
+        predictions = grid.predict(X)
+        try:
+            frame['prediction'] = list(predictions)
+            frame.to_csv('data/{}/{}-predictions-{}.csv'.format(budget, settings.algo, budget), index=False)
+        except:
+            print('Some errors in the prediction')
+        joblib.dump(grid.best_estimator_, 'data/{}/model_{}-{}.pkl'.format(budget, settings.algo, budget), compress=1)
 
 
 def plot_learning_curve(train_sizes, train_scores, test_scores):
@@ -218,39 +212,7 @@ def plot_learning_curve(train_sizes, train_scores, test_scores):
     plt.plot(train_sizes, test_scores_mean, 'o-', color="g",
              label="Cross-validation score")
     plt.legend(loc="best")
-    plt.savefig('data/learning_curve_{}.pdf'.format(algo), bbox_inches='tight')
-
-
-def feature_importance(model):
-    """
-    Computes the feature importance for a given model using the mean decrease accuracy method
-    :param model: the model to test
-    :return: save the
-    """
-    scores = defaultdict(list)
-
-    frame = load_frames()
-    X = frame[metrics].values
-    Y = frame['y'].values
-
-    for i in range(1, 11):
-        split = ShuffleSplit(n_splits=5, train_size=0.7, test_size=0.3)
-        # crossvalidate the scores on a number of different random splits of the data
-        for train_idx, test_idx in split.split(X):
-            X_train, X_test = X[train_idx], X[test_idx]
-            Y_train, Y_test = Y[train_idx], Y[test_idx]
-            model.fit(X_train, Y_train)
-            acc = r2_score(Y_test, model.predict(X_test))
-            for i in range(X.shape[1]):
-                X_t = X_test.copy()
-                np.random.shuffle(X_t[:, i])
-                shuff_acc = r2_score(Y_test, model.predict(X_t))
-                scores[metrics[i]].append((acc - shuff_acc) / acc)
-    print("Features sorted by their score:")
-    s = sorted([(round(np.mean(score), 4), feat) for
-            feat, score in scores.items()], reverse=True)
-    print(s)
-    plot_feature_importance(s[:20], algo)
+    plt.savefig('data/learning_curve_{}.pdf'.format(settings.algo), bbox_inches='tight')
 
 
 def compute_mdi(tool, budget):
@@ -280,13 +242,22 @@ def compute_mdi(tool, budget):
     plot_feature_importance(s[:20], tool, budget)
 
 
-def get_scoring():
-    """Returns the scores to evaluate the model"""
-    return dict(median_absolute_error=make_scorer(median_absolute_error),
-                mean_squared_log_error=make_scorer(mean_squared_log_error),
-                mean_squared_error=make_scorer(mean_squared_error),
-                r2_score=make_scorer(r2_score),
-                mean_absolute_error=make_scorer(mean_absolute_error))
+def get_scoring(model_kind):
+    """Returns the scores to evaluate the model;
+    For the huber model we remove the log error since the prediction might be negative
+    :param model_kind the kind of model
+    """
+    if model_kind == 'huber':
+        return dict(median_absolute_error=make_scorer(median_absolute_error),
+                    mean_squared_error=make_scorer(mean_squared_error),
+                    r2_score=make_scorer(r2_score),
+                    mean_absolute_error=make_scorer(mean_absolute_error))
+    else:
+        return dict(median_absolute_error=make_scorer(median_absolute_error),
+                    mean_squared_log_error=make_scorer(mean_squared_log_error),
+                    mean_squared_error=make_scorer(mean_squared_error),
+                    r2_score=make_scorer(r2_score),
+                    mean_absolute_error=make_scorer(mean_absolute_error))
 
 
 def run_prediction_for_all_frame(budget):
@@ -306,20 +277,22 @@ def run_prediction_for_all_frame(budget):
 
 
 if __name__ == '__main__':
-    global algo
     pd.options.display.float_format = '{:,.3f}'.format
     budgets = ['180', '300', '600', 'default']
     # EvoSuite learning
     settings.algo = 'evosuite'
     for budget in budgets:
-        compute_mdi(tool=settings.algo, budget=budget)
         run_regression(n_inner=5, n_outer=10, model_name='rfr', budget=budget)
+        run_regression(n_inner=5, n_outer=10, model_name='svr', budget=budget)
+        run_regression(n_inner=5, n_outer=10, model_name='huber', budget=budget)
+        run_regression(n_inner=5, n_outer=10, model_name='mlp', budget=budget)
 
     # Randoop learning
     settings.algo = 'randoop'
     for budget in budgets:
-        # pass
-        compute_mdi(tool=settings.algo, budget=budget)
         run_regression(n_inner=5, n_outer=10, model_name='rfr', budget=budget)
+        run_regression(n_inner=5, n_outer=10, model_name='svr', budget=budget)
+        run_regression(n_inner=5, n_outer=10, model_name='huber', budget=budget)
+        run_regression(n_inner=5, n_outer=10, model_name='mlp', budget=budget)
 
 

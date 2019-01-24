@@ -2,6 +2,7 @@ import pandas as pd
 import settings
 import os
 from functools import reduce
+import glob
 
 
 def check_coverage(evosuite, randoop):
@@ -113,9 +114,33 @@ def quartile_table():
     print(res.to_latex())
 
 
+def aggregate_results():
+    """
+    Computes the frames with all the complete results for all the algorithms
+    """
+    for st in settings.BUDGETS:
+        for tool in settings.TOOLS:
+            files = glob.glob('data/{}/evaluation_{}_*'.format(st, tool))
+            if len(files) == 4:
+                res = []
+                for f in files:
+                    if f.endswith('huber.csv'):
+                        algo = 'huber'
+                    elif f.endswith('mlp.csv'):
+                        algo = 'mlp'
+                    elif f.endswith('svr.csv'):
+                        algo = 'svr'
+                    else:
+                        algo = 'rfr'
+                    aux = pd.read_csv(f)
+                    aux = aux[['mean_absolute_error-AUC', 'mean_squared_error', 'median_abs_error', 'r2_score']]
+                    aux['algo'] = algo
+                    aux = aux.set_index('algo')
+                    print(aux)
+                    res.append(aux)
+                frame = pd.concat(res)
+                frame.to_csv('data/{}-{}.csv'.format(tool, st))
+
+
 if __name__ == '__main__':
-    quartile_table()
-    # check_non_changing_coverage()
-    # table_coverage()
-    # group_and_count_for_project()
-    # check_coverage(evosuite='data/evosuite_no_0_all.csv', randoop='data/randoop_no_0_all.csv')
+    pass

@@ -1,4 +1,7 @@
 from sklearn.ensemble import RandomForestRegressor
+from sklearn.neural_network import MLPRegressor
+from sklearn.linear_model import HuberRegressor
+import numpy as np
 
 
 def get_best_models(budget, tool):
