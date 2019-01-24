@@ -2,7 +2,7 @@
 
 This is the repository that hosts all the code and the scripts employed for the Journal of Software: Evolution and Process journal.
 
-The work is the extension of the MaLTeSQuE paper _"How high will it be? using machine learning models to predict branch coverage in automated testing"_
+The work is the extension of the MaLTeSQuE paper _"Branch Coverage Prediction in Automated Testing"_
 
 ## Instructions
 
@@ -31,4 +31,10 @@ Then, install all the dependencies:
 pip3 install -r requirements.txt
 ```
 
+To allow the code to fully work, please copy the directory `projects` and `data` that you find in the parent folder in this one.
 
+### Run the Code
+
+Starting from the generated test, run the scripts in `coverage_calculator.py` to extract the training data you will use for the rest of the study. To aggregate then the data about the coverage and the metrics for each class, use the `model_building.py` script.
+
+Once you set everything, run the machine learning analysis with the `learning.py` file.
